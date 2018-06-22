@@ -1,0 +1,439 @@
+---
+title: "Questionnaire Analysis and Validation"
+author: "Kushan De Silva"
+date: "June 22, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+load("RLMS.RData")
+# Keep item responses
+data = data[,6:9]
+summary(data)
+
+```
+
+Drop from the dataset the sample units with at least one missing response.
+Arrange the response categories in increasing order and then from absolutely unsatisfied (0) to absolutely satisfied (4), so to have a clearer interpretation of the results.
+
+```{r}
+ind = which(apply(is.na(data),1,any))
+# Drop records with missing observations
+data = data[-ind,]
+# Reverse response categories
+data = 4-data
+(n = nrow(data))
+```
+
+Vector ind created through the previous commands contains the labels of the subjects with at least one missing response. After removing these subjects, the sample size reduces to n=1418.
+
+```{r}
+#Distribution of response categories
+table(data[,1])
+table(data[,2])
+table(data[,3])
+table(data[,4])
+
+```
+
+split-half reliability; separately consider two subsets of items and apply the Spearman-Brown formula
+
+```{r}
+Y_obs_even = data$Y2+data$Y4
+Y_obs_odd = data$Y1+data$Y3
+rho = cor(Y_obs_even,Y_obs_odd)
+rel = 2*rho/(1+rho)
+rel
+```
+
+The estimated reliability is high
+
+
+Cronbach's alpha; internal consistency
+
+```{r}
+require(ltm)
+(cron = cronbach.alpha(data))
+cronbach.alpha(data, standardized = TRUE)
+```
+
+Again, reliability estimates are very high.
+
+```{r}
+# individual scores
+Y_obs = rowSums(data)
+# summary statistics and store standard deviation
+summary(Y_obs)
+(sd_Y_obs = sd(Y_obs))
+```
+
+average score is 9.073 with a standard deviation of 3.63
+Moreover, around one-half of the sample has a score between 7 (1st quartile) and 9 (3rd quartile).
+
+
+```{r}
+hist(Y_obs)
+```
+
+
+create a matrix with estimates of the score, subject by subject, and the 95% confidence interval
+
+```{r}
+Conf = cbind(Y_obs,l1=Y_obs-1.96*(sd_Y_obs*sqrt(1-cron$alpha)), l2=Y_obs+1.96*(sd_Y_obs*sqrt(1-cron$alpha)))
+head(Conf)
+```
+
+
+item analysis; mean and SD of each column
+
+```{r}
+cbind(mean=colMeans(data),sd=apply(data,2,sd))
+
+```
+
+The output shows that the item with responses in lower categories is the third.
+
+Item discrimination metrics; Cronbach's ??-if-item-omitted and the item-to-total correlation coefficients
+
+```{r}
+Disc = NULL
+for(j in 1:4){
+Disc = rbind(Disc,
+c(cronbach.alpha(data[,-j], standardized = TRUE)$alpha,
+cor(data[,j],Y_obs)))
+}
+colnames(Disc) = c("alpha","cor")
+Disc
+```
+
+The output shows that the third item has the smallest discriminating power.In fact, Cronbach's ?? increases with respect to the global level (0.832) when this item is removed. Accordingly, for this item, we have the lowest correlation level with the
+observed score.
+
+```{r}
+# Load data
+load("INVALSI_reduced.RData")
+str(Y)
+
+require(ltm)
+# Rasch model
+out = rasch(Y)
+# Extract difficulty parameters and compare them with success rates
+out$beta = -out$coefficients[,1]
+cbind(out$beta,prop=colMeans(Y))
+
+```
+
+
+As expected, there is a correspondence between the difficulty level and the proportion of correct responses.these estimates are obtained under the assumption that the normal distribution of the ability has mean 0 but an arbitrary variance.Maximum likelihood estimate of this variance that may be extracted.
+
+```{r}
+(out$si2 = out$coefficients[1,2]^2)
+```
+
+In order to impose the constraint that this variance is equal to 1, equivalent to assuming that the ability has a standard normal distribution, the rasch function must be used with the additional argument constraint.
+
+```{r}
+out1 = rasch(Y, constraint = cbind(ncol(Y)+1, 1))
+(out1$lr = -2*(out1$log.Lik-out$log.Lik))
+
+out2 = factor.scores(out)
+head(out2$score.dat[,30:31])
+out2$score = out2$score.dat[,30]
+hist(out2$score)
+```
+
+
+```{r}
+# 2PL model
+out3 = ltm(Y~z1)
+# Extract parameters and express them in the usual parametrization
+out3$beta = -out3$coefficients[,1]/out3$coefficients[,2]
+out3$lambda = out3$coefficients[,2]
+cbind(beta=out3$beta,lambda=out3$lambda)
+
+plot(out3)
+
+(out3$lr = -2*(out$log.Lik-out3$log.Lik))
+(out3$pv = 1-pchisq(out3$lr,26))
+```
+
+
+```{r}
+require(irtoys)
+# Rasch model
+out_irtoys = est(Y, model="1PL", engine="ltm", rasch=T)
+# Display difficulty parameters (column 2)
+out_irtoys$est
+# 2PL model
+out3_irtoys = est(Y, model="2PL", engine="ltm")
+# Display discriminating (column 1) and difficulty (column 2) parameters
+out3_irtoys$est
+
+require(mirt)
+# Rasch model
+out_mirt = mirt(data=Y,model=1,itemtype="Rasch")
+# Display easiness item parameters (column d)
+coef(out_mirt)
+# 2PL model
+out3_mirt <- mirt(data=Y,model=1,itemtype="2PL")
+# Display discrimination (column a1) and easiness (column d) item parameters
+(coef=coef(out3_mirt))
+
+-coef$Y1[2]/coef$Y1[1]
+
+```
+
+
+```{r}
+require(irtoys)
+# 3PL model
+out4_irtoys = est(Y, model="3PL", engine="ltm")
+out4_irtoys$est
+
+require(mirt)
+# 3PL model
+out4_mirt = mirt(data=Y,model=1,itemtype="3PL")
+coef(out4_mirt)
+
+# 3PL model with some pseudo-guessing parameters constrained to 0
+out4bis_mirt = mirt(data=Y,model=1,itemtype=c("3PL","2PL","2PL", "2PL","3PL","2PL","3PL","2PL","2PL","2PL","2PL","2PL","2PL","3PL", "3PL", "2PL","3PL","3PL","2PL","3PL","3PL","2PL","2PL","3PL","2PL","3PL","2PL"))
+coef(out4bis_mirt)
+
+```
+
+```{r}
+require(MultiLCIRT)
+# Create data matrix
+Y = as.matrix(Y)
+# LC-Rasch model
+out4 = est_multi_poly(Y,k=5,link=1,fort=T)
+cbind(theta=t(out4$Th),pi=out4$piv)
+
+# Standardize ability distribution
+out5 = standard.matrix(t(out4$Th),out4$piv)
+out5$mu
+out5$si2
+# Centered support points
+(out4$ths = as.vector(out4$Th-out5$mu))
+
+x = seq(-5,5,0.01)
+f = dnorm(x,0,sqrt(out$si2))
+plot(x,f,xlab="ability",ylab="density/probability",type="l",ylim=c(0,0.5))
+for(c in 1:5) lines(c(out4$th[c],out4$th[c]),c(0,out4$piv[c]),type="b")
+
+out4$betas = as.vector(out4$Be-out5$mu)
+cbind(LC=out4$betas,normal=out$beta,diff=out4$betas-out$beta)
+
+# Search the optimal number of support points
+out6 = search.model(Y,kv=1:6,link=1,fort=TRUE)
+
+
+# LC-2PL model
+out7 = est_multi_poly(Y,k=5,link=1,disc=1,fort=T)
+out8 = standard.matrix(t(out7$Th),out7$piv)
+out8$mu
+out8$si2
+# Standardized support points
+out7$ths = as.vector(out7$Th-out8$mu)/sqrt(out8$si2)
+# Standardized difficulties
+out7$betas = as.vector(out7$Be-out8$mu)/sqrt(out8$si2)
+# Standardized discriminating indices
+out7$lambdas = as.vector(out7$gac)*sqrt(out8$si2)
+cbind("LC-beta"=out7$betas,"normal-beta"=out3$beta, "LC-lambda"=out7$lambdas,"normal-lambda"=out3$lambda)
+
+(out7$lr = -2*(out4$lk-out7$lk))
+(out7$pv = 1-pchisq(out7$lr,26))
+
+load("RLMS.RData")
+# Keep item responses
+data = data[,6:9]
+# Drop records with missing observations
+ind = which(apply(is.na(data),1,any))
+data = data[-ind,]
+# Reverse response categories
+data = 4-data
+(n = nrow(data))
+
+# GRM
+out = grm(data,IRT.param=TRUE)
+summary(out)
+
+plot(out)
+
+# 1P-GRM
+out2 = grm(data,IRT.param=TRUE,constrained=TRUE)
+summary(out2)
+
+(dev = -2*(out2$log.Lik-out$log.Lik))
+(pvalue = 1-pchisq(dev,3))
+
+# GPCM
+out3 = gpcm(data,IRT.param=TRUE)
+summary(out3)
+
+# PCM
+out4 = gpcm(data,IRT.param=TRUE,constraint="1PL")
+(dev2 = -2*(out4$log.Lik-out3$log.Lik))
+(pvalue2 = 1-pchisq(dev2,3))
+
+# Aggregate data
+out5 = aggr_data(data)
+S = out5$data_dis
+yv = out5$freq
+# LC-GRM
+out6 = est_multi_poly(S,yv,k=3,link=1,disc=1)
+summary(out6)
+
+# Abilities and class weights
+rbind(out6$Th,pi=out6$piv)
+# Item difficulty parameters
+out6$Bec
+# Item discrimination parameters
+out6$ga
+
+out7 = standard.matrix(t(out6$Th),out6$piv)
+out7$mu
+out7$si2
+
+# Standardized abilities
+(ths = (out6$Th-out7$mu)/out7$si)
+# Standardized difficulties
+(bes = (out6$Bec-out7$mu)/out7$si)
+# Standardized discrimination parameters
+(gas = out6$gac*out7$si)
+
+# LC-1P-GRM
+out8 = est_multi_poly(S,yv,k=3,link=1)
+summary(out8)
+
+(dev3 = -2*(out8$lk-out6$lk))
+(pvalue3 = 1-pchisq(dev3,3))
+# LC-1P-RS-GRM
+out9 = est_multi_poly(S,yv,k=3,link=1,disc=1,difl=1)
+summary(out9)
+out9$Bec
+
+(dev4 = -2*(out9$lk-out6$lk))
+(pvalue4 = 1-pchisq(dev4,9))
+
+# LC-PCM
+out10 = est_multi_poly(S = S, yv = yv, k = 3, link = 2)
+summary(out10)
+
+# Abilities and class weights
+rbind(out10$Th,pi=out10$piv)
+# Item difficulties
+out10$Bec
+# Item discrimination parameters
+out10$gac
+
+# Search the optimal number of support points by BIC
+out11 = search.model(S,yv,kv=1:7,link=1,disc=1)
+out11$bicv
+out12 = out11$out.single[[6]]
+
+load("Invalsi_reduced.RData")
+require(ltm)
+out3 = ltm(Y ~ z1)
+information(out3, range=c(-5,5), items = 19)
+information(out3, range=c(-5,5), items = NULL)
+
+plot(out3, type="IIC" , items = c(7, 19, 23), zrange = c(-5.0, 5.0), 
+     labels = c("Y7","Y19","Y23"), legend=TRUE, lty=c(1,2,4))
+plot(out3, type="IIC" , items = 0, zrange = c(-5.0, 5.0))
+
+out3$beta = -out3$coefficients[,1]/out3$coefficients[,2]
+out3$lambda = out3$coefficients[,2]
+coeff = cbind(beta=out3$beta,lambda=out3$lambda)
+out3scores = factor.scores(out3)
+ability = as.matrix(out3scores$score[,30])
+
+# Response patterns
+obspattern = as.matrix(out3scores$score[,1:27])
+n = nrow(ability)
+J = ncol(obspattern)
+# Posterior probabilities of endorsing each item
+postprob = matrix(rep(0), nrow = n, ncol=J)
+for (i in 1: n){
+for (j in 1 : J) {
+postprob[i,j] = 
+  exp(coeff[j,2]*(ability[i]-coeff[j,1]))/(1+exp(coeff[j,2]*(ability[i]-coeff[j,1]) ))
+}
+}
+postprob_vec = as.vector(t(postprob))
+obspattern_vec = as.vector(t(obspattern))
+
+require(ROCR)
+pred = prediction(predictions=postprob_vec, labels=obspattern_vec)
+# ROC curve
+perf = performance( pred, "tpr", "fpr" )
+plot( perf )
+# AUC value
+performance( pred, "auc")@y.values
+
+
+require(eRm)
+out = RM(Y)
+# Ability estimates
+est_theta = person.parameter(out)
+gof = gofIRT(est_theta)
+
+# Confusion matrix and rates of accuracy, sensitivity, and specificity
+gof$classifier
+
+# ROC curve
+plot(gof$ROC)
+# Alternative way to represent the ROC curve
+TP = gof$ROC@y.values
+FP = gof$ROC@x.values
+plot(FP[[1]], TP[[1]], xlab = "False positive rate" , ylab = "True positive rate")
+# AUC value
+gof$AUC
+
+# Person-item map
+plotPImap(out, sorted=TRUE)
+
+(mpa <- unidimTest(rasch(Y)))
+plot(mpa, type="b",pch=1:2)
+legend("topright", c("Observed data", "Average simulated data"), lty=1, pch=1:2, col=1:2,  bty="n")
+
+MLtest = MLoef(out, "mean")
+summary(MLtest)
+NPtest(as.matrix(Y), method="T2m",stat="var",idx = 1:27)
+gof$test.table
+LRtest(out, splitcr = "median")
+
+# Test T11
+(t11=NPtest(as.matrix(Y), method="T11"))
+# Test statistic of test T11
+(sum(abs(t11$T11r-t11$T11rho)))
+
+# Pairs of items that contribute to test statistic of test T11
+(NPtest(as.matrix(Y), method="T1"))
+# Test T2
+(NPtest(as.matrix(Y), method="T2",stat="var",idx = c(2,11)))
+# AIC, BIC, and LR test for Rasch and 2PL models
+(anova(rasch(Y), out3))
+
+# Test T5
+(NPtest(as.matrix(Y), method = "Tpbis", idxt = 7, idxs = c(2, 14, 15, 20, 27)))
+est_theta = person.parameter(out)
+itemfit(est_theta)
+
+# Estimate Rasch model after eliminating items with |infit t| > 2.00
+Y2 = Y[,c(2,4,5,6,9,10,12,14,15,17,20,21,22,27)]
+out2 = RM(Y2)
+est_theta2 = person.parameter(out2)
+itemfit(est_theta2)
+
+person_fit = personfit(est_theta)
+hist(person_fit$p.infitZ)
+
+
+```
+
+
